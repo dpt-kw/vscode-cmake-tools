@@ -3,6 +3,7 @@ import * as chai from 'chai';
 import * as chaiAsPromised from 'chai-as-promised';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as vscode from 'vscode';
 
 chai.use(chaiAsPromised);
@@ -12,8 +13,9 @@ import * as diags from '@cmt/diagnostics/build';
 import { OutputConsumer } from '../../src/proc';
 import { ExtensionConfigurationSettings, ConfigurationReader } from '../../src/config';
 import { CustomParser, BuildProblemMatcherConfig } from '@cmt/diagnostics/custom';
-import { platformPathEquivalent, resolvePath } from '@cmt/util';
+import { lightNormalizePath, platformPathEquivalent, resolvePath } from '@cmt/util';
 import { CMakeOutputConsumer } from '@cmt/diagnostics/cmake';
+import { beginSarifLog, defaultSarifLogPath, readSarifDiagnostics, requestedSarifLogPath, sarifLogDiagnostics } from '@cmt/diagnostics/sarif';
 import { populateCollection, addDiagnosticToCollection, diagnosticSeverity } from '@cmt/diagnostics/util';
 import collections from '@cmt/diagnostics/collections';
 import { getTestResourceFilePath } from '@test/util';
@@ -1705,5 +1707,223 @@ suite('Diagnostics', () => {
         // GCC should claim this line, NOT the custom parser
         expect(consumer.compilers.gcc.diagnostics).to.have.length(1);
         expect(consumer.customParsers.get('greedy')!.diagnostics).to.have.length(0);
+    });
+
+    // ===== CMake SARIF diagnostics (cmake --sarif-output) tests =====
+
+    const sarifLogFixture = () => getTestResourceFilePath('test_cmake_diagnostics.sarif');
+    const readSarifFixture = () => JSON.parse(fs.readFileSync(sarifLogFixture(), 'utf8'));
+
+    test('SARIF results become one diagnostic each, per the run base directories', () => {
+        const diagnostics = sarifLogDiagnostics(readSarifFixture());
+        // Six results, of which the last has no location to place it in a file
+        expect(diagnostics).to.have.length(5);
+        expect(diagnostics.map(d => d.filepath)).to.deep.eq([
+            '/project/src/warnings.cmake',
+            '/project/src/warnings.cmake',
+            '/project/build/generated/Config.cmake',
+            '/opt/toolchains/vendor.cmake',
+            '/project/src/warnings.cmake'
+        ]);
+        expect(diagnostics.every(d => d.diag.source === 'cmake')).to.be.true;
+    });
+
+    test('SARIF results carry their message, rule id, level and line', () => {
+        const diagnostics = sarifLogDiagnostics(readSarifFixture());
+        const [warning, author, deprecated, toolchain] = diagnostics;
+
+        expect(warning.diag.message).to.eq('Example warning message');
+        expect(warning.diag.code).to.eq('CMake.Warning');
+        expect(warning.diag.severity).to.eq(vscode.DiagnosticSeverity.Warning);
+        // SARIF lines are 1-based, vscode ranges are 0-based
+        expect(warning.diag.range.start.line).to.eq(1);
+        expect(warning.diag.range.start.character).to.eq(0);
+
+        expect(author.diag.code).to.eq('CMake.Author');
+        expect(author.diag.severity).to.eq(vscode.DiagnosticSeverity.Warning);
+        expect(author.diag.range.start.line).to.eq(10);
+
+        // `note` is the SARIF level for things that are not warnings or errors
+        expect(deprecated.diag.severity).to.eq(vscode.DiagnosticSeverity.Information);
+        expect(deprecated.diag.code).to.eq('CMake.Deprecated');
+        expect(deprecated.diag.range.start.line).to.eq(6);
+        expect(deprecated.diag.range.start.character).to.eq(4);
+
+        expect(toolchain.diag.severity).to.eq(vscode.DiagnosticSeverity.Error);
+        expect(toolchain.diag.message).to.eq('Toolchain file is broken');
+        expect(toolchain.diag.range.start.line).to.eq(39);
+    });
+
+    test('SARIF call stacks become related information, without repeating the diagnostic location', () => {
+        const diagnostics = sarifLogDiagnostics(readSarifFixture());
+        const related = diagnostics[0].diag.relatedInformation!;
+        // Three frames, the innermost of which is the diagnostic's own location
+        expect(related).to.have.length(2);
+        expect(related[0].message).to.eq("In call to 'a' here");
+        expect(related[0].location.uri.fsPath).to.eq(vscode.Uri.file('/project/src/warnings.cmake').fsPath);
+        expect(related[0].location.range.start.line).to.eq(23);
+        expect(related[1].message).to.eq("In call to 'include' here");
+        expect(related[1].location.uri.fsPath).to.eq(vscode.Uri.file('/project/src/CMakeLists.txt').fsPath);
+        expect(related[1].location.range.start.line).to.eq(2);
+
+        // A result with no call stack gets no related information
+        expect(diagnostics[1].diag.relatedInformation).to.have.length(0);
+
+        // A frame with no region is a placeholder; CMake labels it instead
+        const deferred = diagnostics[4].diag.relatedInformation!;
+        expect(deferred).to.have.length(1);
+        expect(deferred[0].message).to.eq('DEFERRED');
+        expect(deferred[0].location.range.start.line).to.eq(0);
+    });
+
+    test('SARIF diagnostics group by file when populating a collection', () => {
+        const coll = vscode.languages.createDiagnosticCollection('cmake-tools-sarif-test');
+        populateCollection(coll, sarifLogDiagnostics(readSarifFixture()));
+        expect(coll.get(vscode.Uri.file('/project/src/warnings.cmake'))).to.have.length(3);
+        expect(coll.get(vscode.Uri.file('/project/build/generated/Config.cmake'))).to.have.length(1);
+        expect(coll.get(vscode.Uri.file('/opt/toolchains/vendor.cmake'))).to.have.length(1);
+        coll.dispose();
+    });
+
+    test('A SARIF log with no results yields no diagnostics', () => {
+        const emptyLog = {
+            version: '2.1.0',
+            runs: [{ tool: { driver: { name: 'CMake', rules: [] } }, results: [] }]
+        };
+        expect(sarifLogDiagnostics(emptyLog as any)).to.have.length(0);
+    });
+
+    test('A SARIF result relative to an undeclared base is dropped', () => {
+        const log = {
+            version: '2.1.0',
+            runs: [{
+                tool: { driver: { name: 'CMake', rules: [] } },
+                results: [{
+                    level: 'error',
+                    message: { text: 'Nowhere in particular' },
+                    locations: [{
+                        physicalLocation: {
+                            artifactLocation: { uri: 'nowhere.cmake', uriBaseId: 'SOME_OTHER_DIR' },
+                            region: { startLine: 1 }
+                        }
+                    }]
+                }]
+            }]
+        };
+        expect(sarifLogDiagnostics(log as any)).to.have.length(0);
+    });
+
+    test('A SARIF result with no level defaults to a warning, and `none` to a hint', () => {
+        const log = {
+            version: '2.1.0',
+            runs: [{
+                tool: { driver: { name: 'CMake', rules: [] } },
+                originalUriBaseIds: { CMAKE_SOURCE_DIR: { uri: 'file:///project/src/' } },
+                results: [
+                    {
+                        message: { text: 'No level given' },
+                        locations: [{ physicalLocation: { artifactLocation: { uri: 'a.cmake', uriBaseId: 'CMAKE_SOURCE_DIR' }, region: { startLine: 1 } } }]
+                    },
+                    {
+                        level: 'none',
+                        message: { text: 'Not a problem in itself' },
+                        locations: [{ physicalLocation: { artifactLocation: { uri: 'a.cmake', uriBaseId: 'CMAKE_SOURCE_DIR' }, region: { startLine: 2 } } }]
+                    }
+                ]
+            }]
+        };
+        const diagnostics = sarifLogDiagnostics(log as any);
+        expect(diagnostics[0].diag.severity).to.eq(vscode.DiagnosticSeverity.Warning);
+        expect(diagnostics[1].diag.severity).to.eq(vscode.DiagnosticSeverity.Hint);
+    });
+
+    test('requestedSarifLogPath finds a log the project asked for itself', () => {
+        expect(requestedSarifLogPath(['-S', '.', '--sarif-output=/tmp/mine.sarif'])).to.eq('/tmp/mine.sarif');
+        expect(requestedSarifLogPath(['--sarif-output', '/tmp/mine.sarif', '-B', 'build'])).to.eq('/tmp/mine.sarif');
+        expect(requestedSarifLogPath(['-S', '.', '-B', 'build'])).to.be.undefined;
+        // A trailing flag with nothing after it is not a path
+        expect(requestedSarifLogPath(['--sarif-output'])).to.be.undefined;
+    });
+
+    suite('beginSarifLog', () => {
+        let buildDir = '';
+        setup(() => {
+            buildDir = lightNormalizePath(fs.mkdtempSync(path.join(os.tmpdir(), 'cmt-sarif-')));
+        });
+        teardown(() => {
+            fs.rmSync(buildDir, { recursive: true, force: true });
+        });
+
+        test('asks CMake for a log at the location CMAKE_EXPORT_SARIF would use', async () => {
+            const args = ['-S', '/project/src', '-B', buildDir];
+            const logPath = await beginSarifLog(args, buildDir, buildDir);
+            expect(logPath).to.eq(defaultSarifLogPath(buildDir));
+            expect(args).to.contain(`--sarif-output=${logPath}`);
+            // The directory has to exist before CMake can write into it
+            expect(fs.existsSync(path.dirname(logPath!))).to.be.true;
+        });
+
+        test('leaves a log the project asked for itself alone', async () => {
+            const requested = path.join(buildDir, 'mine.sarif');
+            const args = ['-S', '/project/src', '-B', buildDir, `--sarif-output=${requested}`];
+            const logPath = await beginSarifLog(args, buildDir, buildDir);
+            expect(logPath).to.eq(lightNormalizePath(requested));
+            expect(args.filter(a => a.startsWith('--sarif-output'))).to.have.length(1);
+        });
+
+        test('resolves a relative path the project asked for against the working directory', async () => {
+            const args = ['-S', '/project/src', '--sarif-output', 'mine.sarif'];
+            const logPath = await beginSarifLog(args, '/project/build', buildDir);
+            expect(logPath).to.eq(lightNormalizePath(path.join(buildDir, 'mine.sarif')));
+        });
+
+        test('removes the log left behind by the previous run', async () => {
+            const args = ['-S', '/project/src', '-B', buildDir];
+            const logPath = defaultSarifLogPath(buildDir);
+            fs.mkdirSync(path.dirname(logPath), { recursive: true });
+            fs.writeFileSync(logPath, 'stale');
+            await beginSarifLog(args, buildDir, buildDir);
+            expect(fs.existsSync(logPath)).to.be.false;
+        });
+    });
+
+    test('readSarifDiagnostics ignores a log that is missing or unreadable', async () => {
+        expect(await readSarifDiagnostics(path.join(os.tmpdir(), 'cmt-no-such-log.sarif'))).to.be.undefined;
+
+        const garbage = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cmt-sarif-')), 'cmake.sarif');
+        fs.writeFileSync(garbage, 'this is not JSON');
+        expect(await readSarifDiagnostics(garbage)).to.be.undefined;
+        fs.rmSync(path.dirname(garbage), { recursive: true, force: true });
+    });
+
+    test('CMakeOutputConsumer reports the SARIF log instead of, not as well as, its parsed output', async () => {
+        const sarifConsumer = new CMakeOutputConsumer('/project/src');
+        feedLines(sarifConsumer, [], [
+            'CMake Warning at warnings.cmake:2 (message):',
+            '  Example warning message',
+            '',
+            ''
+        ]);
+        expect(sarifConsumer.diagnostics).to.have.length(1);
+
+        expect(await sarifConsumer.ingestSarifLog(sarifLogFixture())).to.be.true;
+        // The log supersedes the parsed output wholesale, so the warning that
+        // both sources describe appears exactly once
+        expect(sarifConsumer.diagnostics).to.have.length(5);
+        expect(sarifConsumer.diagnostics.filter(d => d.diag.message === 'Example warning message')).to.have.length(1);
+        expect(sarifConsumer.diagnostics.every(d => d.diag.code !== undefined)).to.be.true;
+    });
+
+    test('CMakeOutputConsumer keeps its parsed output when there is no SARIF log to read', async () => {
+        const sarifConsumer = new CMakeOutputConsumer('/project/src');
+        feedLines(sarifConsumer, [], [
+            'CMake Warning at warnings.cmake:2 (message):',
+            '  Example warning message',
+            '',
+            ''
+        ]);
+        expect(await sarifConsumer.ingestSarifLog(path.join(os.tmpdir(), 'cmt-no-such-log.sarif'))).to.be.false;
+        expect(sarifConsumer.diagnostics).to.have.length(1);
+        expect(sarifConsumer.diagnostics[0].filepath).to.eq('/project/src/warnings.cmake');
     });
 });

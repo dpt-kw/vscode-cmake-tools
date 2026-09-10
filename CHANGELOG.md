@@ -9,6 +9,7 @@ Features:
 - Add `cmake.preConfigureTask` setting to execute a named VS Code task before every CMake configure. [#2449](https://github.com/microsoft/vscode-cmake-tools/issues/2449) [#4960](https://github.com/microsoft/vscode-cmake-tools/pull/4960) [@erdemiru](https://github.com/erdemiru)
 
 Improvements:
+- Populate the Problems view for configure warnings and errors from the SARIF log CMake writes (`cmake --sarif-output`) instead of parsing them out of the console, giving exact file/line/severity and call stacks with CMake 4.0 or newer. CMake's output is still logged in full, and older CMake versions keep using the existing output parsing.
 - Add `${testName}` variable support for `cmake.ctestArgs` and `cmake.ctestDefaultArgs`, enabling per-test argument expansion (e.g., unique log file paths per test). [#4416](https://github.com/microsoft/vscode-cmake-tools/issues/4416)
 - Stop the CMake output channel from taking over the panel (hiding the terminal you're working in) during automatic configures (e.g. configure-on-open and automatic reconfigure) and programmatic builds or tests invoked through the CMake Tools API (e.g. by Copilot via the C/C++ DevTools companion). Failures are still always shown, explicit user-initiated builds/configures are unchanged, and `cmake.revealLogOnAutomaticTrigger` restores the old behavior. [#4988](https://github.com/microsoft/vscode-cmake-tools/issues/4988)
 - Reduce CI pipeline time by parallelizing E2E test jobs and adding build artifact caching.

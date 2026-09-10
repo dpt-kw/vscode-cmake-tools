@@ -31,6 +31,7 @@ import { BuildPreset, ConfigurePreset, getValue, TestPreset, PackagePreset, Work
 import * as nls from 'vscode-nls';
 import { DebuggerInformation } from '@cmt/debug/cmakeDebugger/debuggerConfigureDriver';
 import { CMakeOutputConsumer, StateMessage } from '@cmt/diagnostics/cmake';
+import { beginSarifLog } from '@cmt/diagnostics/sarif';
 import { ConfigureTrigger } from '@cmt/cmakeProject';
 import { onConfigureSettingsChange } from '@cmt/ui/util';
 
@@ -290,12 +291,19 @@ export class CMakeFileApiDriver extends CMakeDriver {
             return 0;
         } else {
             log.debug(`Configuring using ${this.useCMakePresets ? 'preset' : 'kit'}`);
-            log.debug('Invoking CMake', cmake, 'with arguments', JSON.stringify(args));
             const env = await this.getConfigureEnvironment(configurePreset, options?.environment);
+            const cwd = options?.cwd ?? binaryDir;
+
+            // CMake 4.0 and newer can record the diagnostics of this run to a
+            // SARIF log. When it does, that log — not the console output — is
+            // what ends up in the Problems view; see `CMakeOutputConsumer`.
+            const sarifLogPath = this.cmake.isSarifSupported ? await beginSarifLog(args, binaryDir, cwd) : undefined;
+
+            log.debug('Invoking CMake', cmake, 'with arguments', JSON.stringify(args));
 
             const child = this.executeCommand(cmake, args, outputConsumer, {
                 environment: env,
-                cwd: options?.cwd ?? binaryDir
+                cwd
             });
             this.configureProcess = child;
 
@@ -313,6 +321,9 @@ export class CMakeFileApiDriver extends CMakeDriver {
 
             const result = await child.result;
             this.configureProcess = null;
+            if (sarifLogPath && outputConsumer instanceof CMakeOutputConsumer) {
+                await outputConsumer.ingestSarifLog(sarifLogPath);
+            }
             if (result.retc === 0) {
                 if (!configurePreset || (configurePreset && defaultConfigurePresetName && configurePreset.name === defaultConfigurePresetName)) {
                     this._needsReconfigure = false;

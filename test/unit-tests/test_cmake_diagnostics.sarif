@@ -1,0 +1,361 @@
+{
+	"$schema" : "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+	"runs" : 
+	[
+		{
+			"invocations" : 
+			[
+				{
+					"arguments" : 
+					[
+						"/usr/bin/cmake",
+						"-S",
+						"/project/src",
+						"-B",
+						"/project/build",
+						"--sarif-output=/project/build/.cmake/sarif/cmake.sarif"
+					],
+					"endTimeUtc" : "2026-08-25T20:08:45Z",
+					"executableLocation" : 
+					{
+						"uri" : "/usr/bin/cmake"
+					},
+					"executionSuccessful" : false,
+					"exitCode" : 1,
+					"startTimeUtc" : "2026-08-25T20:08:45Z"
+				}
+			],
+			"originalUriBaseIds" : 
+			{
+				"CMAKE_BINARY_DIR" : 
+				{
+					"uri" : "file:///project/build/"
+				},
+				"CMAKE_SOURCE_DIR" : 
+				{
+					"uri" : "file:///project/src/"
+				}
+			},
+			"results" : 
+			[
+				{
+					"level" : "warning",
+					"locations" : 
+					[
+						{
+							"logicalLocations" : 
+							[
+								{
+									"kind" : "function",
+									"name" : "message"
+								}
+							],
+							"physicalLocation" : 
+							{
+								"artifactLocation" : 
+								{
+									"uri" : "warnings.cmake",
+									"uriBaseId" : "CMAKE_SOURCE_DIR"
+								},
+								"region" : 
+								{
+									"startLine" : 2
+								}
+							}
+						}
+					],
+					"message" : 
+					{
+						"text" : "Example warning message"
+					},
+					"ruleId" : "CMake.Warning",
+					"ruleIndex" : 0,
+					"stacks" : 
+					[
+						{
+							"frames" : 
+							[
+								{
+									"location" : 
+									{
+										"logicalLocations" : 
+										[
+											{
+												"kind" : "function",
+												"name" : "message"
+											}
+										],
+										"physicalLocation" : 
+										{
+											"artifactLocation" : 
+											{
+												"uri" : "warnings.cmake",
+												"uriBaseId" : "CMAKE_SOURCE_DIR"
+											},
+											"region" : 
+											{
+												"startLine" : 2
+											}
+										}
+									}
+								},
+								{
+									"location" : 
+									{
+										"logicalLocations" : 
+										[
+											{
+												"kind" : "function",
+												"name" : "a"
+											}
+										],
+										"physicalLocation" : 
+										{
+											"artifactLocation" : 
+											{
+												"uri" : "warnings.cmake",
+												"uriBaseId" : "CMAKE_SOURCE_DIR"
+											},
+											"region" : 
+											{
+												"startLine" : 24
+											}
+										}
+									}
+								},
+								{
+									"location" : 
+									{
+										"logicalLocations" : 
+										[
+											{
+												"kind" : "function",
+												"name" : "include"
+											}
+										],
+										"physicalLocation" : 
+										{
+											"artifactLocation" : 
+											{
+												"uri" : "CMakeLists.txt",
+												"uriBaseId" : "CMAKE_SOURCE_DIR"
+											},
+											"region" : 
+											{
+												"startLine" : 3
+											}
+										}
+									}
+								}
+							]
+						}
+					]
+				},
+				{
+					"level" : "warning",
+					"locations" : 
+					[
+						{
+							"logicalLocations" : 
+							[
+								{
+									"kind" : "function",
+									"name" : "message"
+								}
+							],
+							"physicalLocation" : 
+							{
+								"artifactLocation" : 
+								{
+									"uri" : "warnings.cmake",
+									"uriBaseId" : "CMAKE_SOURCE_DIR"
+								},
+								"region" : 
+								{
+									"startLine" : 11
+								}
+							}
+						}
+					],
+					"message" : 
+					{
+						"text" : "Example author warning message"
+					},
+					"ruleId" : "CMake.Author",
+					"ruleIndex" : 1
+				},
+				{
+					"level" : "note",
+					"locations" : 
+					[
+						{
+							"physicalLocation" : 
+							{
+								"artifactLocation" : 
+								{
+									"uri" : "generated/Config.cmake",
+									"uriBaseId" : "CMAKE_BINARY_DIR"
+								},
+								"region" : 
+								{
+									"startLine" : 7,
+									"startColumn" : 5
+								}
+							}
+						}
+					],
+					"message" : 
+					{
+						"text" : "A deprecated command was used"
+					},
+					"ruleId" : "CMake.Deprecated",
+					"ruleIndex" : 2
+				},
+				{
+					"level" : "error",
+					"locations" : 
+					[
+						{
+							"physicalLocation" : 
+							{
+								"artifactLocation" : 
+								{
+									"uri" : "/opt/toolchains/vendor.cmake"
+								},
+								"region" : 
+								{
+									"startLine" : 40
+								}
+							}
+						}
+					],
+					"message" : 
+					{
+						"text" : "Toolchain file is broken"
+					},
+					"ruleId" : "CMake.FatalError",
+					"ruleIndex" : 3
+				},
+				{
+					"level" : "error",
+					"locations" : 
+					[
+						{
+							"logicalLocations" : 
+							[
+								{
+									"kind" : "function",
+									"name" : "message"
+								}
+							],
+							"physicalLocation" : 
+							{
+								"artifactLocation" : 
+								{
+									"uri" : "warnings.cmake",
+									"uriBaseId" : "CMAKE_SOURCE_DIR"
+								},
+								"region" : 
+								{
+									"startLine" : 46
+								}
+							}
+						}
+					],
+					"message" : 
+					{
+						"text" : "Encabulator: a deferred error"
+					},
+					"ruleId" : "CMake.FatalError",
+					"ruleIndex" : 3,
+					"stacks" : 
+					[
+						{
+							"frames" : 
+							[
+								{
+									"location" : 
+									{
+										"logicalLocations" : 
+										[
+											{
+												"kind" : "function",
+												"name" : "message"
+											}
+										],
+										"physicalLocation" : 
+										{
+											"artifactLocation" : 
+											{
+												"uri" : "warnings.cmake",
+												"uriBaseId" : "CMAKE_SOURCE_DIR"
+											},
+											"region" : 
+											{
+												"startLine" : 46
+											}
+										}
+									}
+								},
+								{
+									"location" : 
+									{
+										"message" : 
+										{
+											"text" : "DEFERRED"
+										},
+										"physicalLocation" : 
+										{
+											"artifactLocation" : 
+											{
+												"uri" : "CMakeLists.txt",
+												"uriBaseId" : "CMAKE_SOURCE_DIR"
+											}
+										}
+									}
+								}
+							]
+						}
+					]
+				},
+				{
+					"level" : "error",
+					"message" : 
+					{
+						"text" : "A diagnostic with no backtrace to place it in a file"
+					},
+					"ruleId" : "CMake.FatalError",
+					"ruleIndex" : 3
+				}
+			],
+			"tool" : 
+			{
+				"driver" : 
+				{
+					"name" : "CMake",
+					"rules" : 
+					[
+						{
+							"id" : "CMake.Warning",
+							"name" : "CMake Warning"
+						},
+						{
+							"id" : "CMake.Author",
+							"name" : "CMD_AUTHOR"
+						},
+						{
+							"id" : "CMake.Deprecated",
+							"name" : "CMD_DEPRECATED"
+						},
+						{
+							"id" : "CMake.FatalError",
+							"name" : "CMake Error"
+						}
+					],
+					"version" : "4.4.20260806-ge6568ab"
+				}
+			}
+		}
+	],
+	"version" : "2.1.0"
+}

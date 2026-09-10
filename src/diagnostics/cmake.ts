@@ -8,6 +8,7 @@ import * as util from '@cmt/util';
 import * as vscode from 'vscode';
 
 import { FileDiagnostic, oneLess } from '@cmt/diagnostics/util';
+import { readSarifDiagnostics } from '@cmt/diagnostics/sarif';
 
 export enum StateMessage {
     WaitingForDebuggerClient = "Waiting for debugger client to connect...",
@@ -41,12 +42,41 @@ export class CMakeOutputConsumer extends CommandConsumer {
 
     /**
      * The diagnostics that this consumer has accumulated. It will be populated
-     * during calls to `output()` and `error()`
+     * during calls to `output()` and `error()`, unless CMake recorded a SARIF
+     * log for the run, in which case the log supersedes them entirely.
      */
-    get diagnostics() {
-        return this._diagnostics;
+    get diagnostics(): readonly FileDiagnostic[] {
+        return this._sarifDiagnostics ?? this._diagnostics;
     }
     private readonly _diagnostics = [] as FileDiagnostic[];
+
+    /**
+     * The diagnostics CMake recorded in the SARIF log for this run, once one has
+     * been read.
+     *
+     * CMake's SARIF log lists exactly the warnings and errors it also printed to
+     * the console, so the two sources can never be merged without reporting
+     * every diagnostic twice. Rather than reconciling them afterwards, the
+     * structured log simply takes the place of the text scraped out of the
+     * console for the whole run: only one source is ever visible through
+     * `diagnostics`, so there is nothing to deduplicate.
+     */
+    private _sarifDiagnostics: FileDiagnostic[] | null = null;
+
+    /**
+     * Take this run's diagnostics from the SARIF log CMake wrote, instead of
+     * from the console output parsed by `output()` and `error()`.
+     * @param logPath Path to the SARIF log written by this run of CMake
+     * @returns `true` if the log was read and is now the source of `diagnostics`
+     */
+    async ingestSarifLog(logPath: string): Promise<boolean> {
+        const diagnostics = await readSarifDiagnostics(logPath);
+        if (!diagnostics) {
+            return false;
+        }
+        this._sarifDiagnostics = diagnostics;
+        return true;
+    }
 
     /**
      * The stateful messages that this consumer has accumulated. It will be populated
