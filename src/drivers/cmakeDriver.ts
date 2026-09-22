@@ -13,6 +13,7 @@ import { CompileCommand } from '@cmt/compilationDatabase';
 import { ConfigurationReader, checkBuildOverridesPresent, checkConfigureOverridesPresent, checkTestOverridesPresent, checkPackageOverridesPresent, defaultNumJobs } from '@cmt/config';
 import { CMakeBuildConsumer, CompileOutputConsumer } from '@cmt/diagnostics/build';
 import { CMakeOutputConsumer } from '@cmt/diagnostics/cmake';
+import { argsControlSarif, exportSarifVariable } from '@cmt/diagnostics/sarif';
 import { RawDiagnosticParser } from '@cmt/diagnostics/util';
 import { ProgressMessage } from '@cmt/drivers/drivers';
 import * as expand from '@cmt/expand';
@@ -1419,6 +1420,17 @@ export abstract class CMakeDriver implements vscode.Disposable {
             const exportCompileCommandsValue = util.cmakeify(exportCompileCommandsFile);
             expandedArgs.push(`-DCMAKE_EXPORT_COMPILE_COMMANDS:${exportCompileCommandsValue.type}=${exportCompileCommandsValue.value}`);
         }
+        // Ask CMake to record its configure diagnostics to a SARIF log, which
+        // is a more dependable account of them than its console output. Leave
+        // it to the user when the preset or configureArgs already decide
+        // CMAKE_EXPORT_SARIF (on, off, or unset) or name a --sarif-output.
+        const exportSarifFile = config.get<boolean>("exportSarifFile") ?? true;
+        const hasExportSarif = Object.prototype.hasOwnProperty.call(presetCacheVariables, exportSarifVariable)
+            || argsControlSarif(expandedArgs);
+        if (!hasExportSarif && exportSarifFile && this.cmake.isSarifSupported) {
+            const exportSarifValue = util.cmakeify(true);
+            expandedArgs.push(`-DCMAKE_EXPORT_SARIF:${exportSarifValue.type}=${exportSarifValue.value}`);
+        }
         // Only use the installPrefix config if the user didn't
         // provide one via the preset or configureArgs
         const hasInstallPrefix = Object.prototype.hasOwnProperty.call(presetCacheVariables, 'CMAKE_INSTALL_PREFIX')
@@ -1436,7 +1448,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
         const initial_common_flags = extra_args.concat(this.config.configureArgs);
         const noWarnUnusedCliFlag = util.modernizeCMakeDiagnosticFlag("--no-warn-unused-cli", this.cmake.version);
         const common_flags = initial_common_flags.includes("--warn-unused-cli") ? initial_common_flags.filter(f => f !== "--warn-unused-cli") : initial_common_flags.concat(noWarnUnusedCliFlag);
-        const define_flags = withoutCmakeSettings ? [] : this.generateCMakeSettingsFlags();
+        const define_flags = withoutCmakeSettings ? [] : this.generateCMakeSettingsFlags(common_flags);
         const final_flags = define_flags.concat(common_flags, init_cache_flags);
 
         // Get expanded configure environment
@@ -1693,7 +1705,11 @@ export abstract class CMakeDriver implements vscode.Disposable {
         return flags;
     }
 
-    private generateCMakeSettingsFlags(): string[] {
+    /**
+     * @param commonFlags The extra and `cmake.configureArgs` arguments that
+     * will follow these flags on the command line
+     */
+    private generateCMakeSettingsFlags(commonFlags: string[]): string[] {
         const settingMap: { [key: string]: util.CMakeValue } = {};
 
         if (this._variantLinkage !== null) {
@@ -1731,6 +1747,19 @@ export abstract class CMakeDriver implements vscode.Disposable {
         const exportCompileCommandsFile: boolean = exportCompileCommandsSetting === undefined ? true : (exportCompileCommandsSetting || false);
         if (exportCompileCommandsFile) {
             settingMap.CMAKE_EXPORT_COMPILE_COMMANDS = util.cmakeify(exportCompileCommandsFile);
+        }
+
+        // Export the configure diagnostics to a SARIF log, which is a more
+        // dependable account of them than CMake's console output. Only when the
+        // user has not already made the choice: via configureSettings or the
+        // variant, or via configureArgs deciding CMAKE_EXPORT_SARIF or naming a
+        // --sarif-output. (A kit's cmakeSettings are applied below and win
+        // regardless.)
+        const exportSarifFile = config.get<boolean>("exportSarifFile") ?? true;
+        const hasExportSarif = Object.prototype.hasOwnProperty.call(settingMap, exportSarifVariable)
+            || argsControlSarif(commonFlags);
+        if (!hasExportSarif && exportSarifFile && this.cmake.isSarifSupported) {
+            settingMap[exportSarifVariable] = util.cmakeify(true);
         }
 
         console.assert(!!this._kit);
